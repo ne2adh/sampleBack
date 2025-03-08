@@ -43,8 +43,8 @@ RUN npm install --only=production
 
 # Definir variables de entorno
 ENV NODE_ENV=production
-ENV PORT=3001
+ENV PORT=80
 
-EXPOSE 3001
+EXPOSE 80
 
 CMD ["npm", "start"]

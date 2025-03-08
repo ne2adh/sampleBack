@@ -10,6 +10,8 @@ RUN npm install --silent && npm cache clean --force
 # Copiar el resto del código fuente
 COPY . .  
 
+RUN chmod +x node_modules/.bin/tsc
+
 # Compilar TypeScript
 RUN npm run build
 

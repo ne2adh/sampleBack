@@ -17,7 +17,17 @@ router.get("/rows", async (req, res) => {
       res.status(400).json({ success: false, message: "El parámetro 'fecha' es requerido" });
     }
     const [rows] = await pool.query("SELECT * FROM tasks WHERE DATE(fecha) = ?", [fecha]);
-    res.json({ success: true, data: rows });
+    
+    if (Array.isArray(rows)) {
+      const formattedRows = rows.map((row: any )=> ({
+        ...row,
+        fecha: new Date(row.fecha).toISOString().split('T')[0], // Extrae solo la fecha YYYY-MM-DD
+      }));
+      res.json({ success: true, data: formattedRows });
+    } else {
+      console.error("Error: rows no es un array", rows);
+    }
+    
   } catch (error) {
     handleDatabaseError(error, res);
   }

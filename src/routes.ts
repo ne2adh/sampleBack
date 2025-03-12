@@ -51,7 +51,9 @@ router.post("/rows", async (req, res) => {
                 "INSERT INTO tasks (id, fecha, responsable, institucion, titulo, hora, lugar, isEditing, isNew) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [id, fecha, responsable, institucion, titulo, hora, lugar, isEditing, isNew]
             );
-        }        
+        }
+        const io: Server = req.app.get("socketio");
+        io.emit("update", fecha);        
         res.json({ success: true, message: "Operación exitosa" });
     }
   } catch (error) {
@@ -60,13 +62,17 @@ router.post("/rows", async (req, res) => {
 });
 
 // Eliminar fila
-router.delete("/rows/:id", async (req, res) => {
+router.delete("/rows/:id/:c", async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id, c } = req.params;
     if (!id) {
       res.json({ success: false, message: "El ID es requerido" });
     }
     await pool.query("DELETE FROM tasks WHERE id = ?", [id]);
+    const io: Server = req.app.get("socketio");
+	io.emit("update", c);
+    console.log("Fila eliminada correctamente");
+
     res.json({ success: true, message: "Fila eliminada correctamente" });
   } catch (error) {
     handleDatabaseError(error, res);

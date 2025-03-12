@@ -22,7 +22,7 @@ io.on("connection", (socket) => {
   socket.on("update", () => {
     io.emit("update");
   });
-
+    
   socket.on("disconnect", () => {
     console.log("Usuario desconectado");
   });

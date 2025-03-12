@@ -14,7 +14,7 @@ router.get("/rows", async (req, res) => {
   try {
     const { fecha } = req.query;
     if (!fecha) {
-      res.status(400).json({ success: false, message: "El parámetro 'fecha' es requerido" });
+      res.json({ success: false, message: "El parámetro 'fecha' es requerido" });
     }
     const [rows] = await pool.query("SELECT * FROM tasks WHERE DATE(fecha) = ?", [fecha]);
     
@@ -26,6 +26,7 @@ router.get("/rows", async (req, res) => {
       res.json({ success: true, data: formattedRows });
     } else {
       console.error("Error: rows no es un array", rows);
+      res.json({ success: false, message: "Error: rows no es un array" });
     }
     
   } catch (error) {
@@ -38,20 +39,21 @@ router.post("/rows", async (req, res) => {
   try {
     const { id, fecha, responsable, institucion, titulo, hora, lugar, isEditing, isNew } = req.body;
     if (!fecha || !responsable || !titulo || !hora || !lugar) {
-      res.status(400).json({ success: false, message: "Faltan campos obligatorios" });
+      res.json({ success: false, message: "Faltan campos obligatorios" });
+    } else{
+        if (id && !isNew) {
+            await pool.query(
+                "UPDATE tasks SET fecha = ?, responsable = ?, institucion = ?, titulo = ?, hora = ?, lugar = ?, isEditing = ?, isNew = ? WHERE id = ?",
+                [fecha, responsable, institucion, titulo, hora, lugar, isEditing, isNew, id]
+            );
+        } else {
+            await pool.query(
+                "INSERT INTO tasks (id, fecha, responsable, institucion, titulo, hora, lugar, isEditing, isNew) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [id, fecha, responsable, institucion, titulo, hora, lugar, isEditing, isNew]
+            );
+        }        
+        res.json({ success: true, message: "Operación exitosa" });
     }
-    if (id && !isNew) {
-      await pool.query(
-        "UPDATE tasks SET fecha = ?, responsable = ?, institucion = ?, titulo = ?, hora = ?, lugar = ?, isEditing = ?, isNew = ? WHERE id = ?",
-        [fecha, responsable, institucion, titulo, hora, lugar, isEditing, isNew, id]
-      );
-    } else {
-      await pool.query(
-        "INSERT INTO tasks (id, fecha, responsable, institucion, titulo, hora, lugar, isEditing, isNew) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        [id, fecha, responsable, institucion, titulo, hora, lugar, isEditing, isNew]
-      );
-    }
-    res.json({ success: true, message: "Operación exitosa" });
   } catch (error) {
     handleDatabaseError(error, res);
   }
@@ -62,7 +64,7 @@ router.delete("/rows/:id", async (req, res) => {
   try {
     const { id } = req.params;
     if (!id) {
-      res.status(400).json({ success: false, message: "El ID es requerido" });
+      res.json({ success: false, message: "El ID es requerido" });
     }
     await pool.query("DELETE FROM tasks WHERE id = ?", [id]);
     res.json({ success: true, message: "Fila eliminada correctamente" });
@@ -78,7 +80,7 @@ router.post("/login", async (req, res) => {
 	try {
 	  const { username } = req.body;
 	  if (!username) {
-		res.status(400).json({ error: "El username es requerido" });
+		res.json({ success: false,  message: "El username es requerido" });
 	  }
   
 	  // Verificar si el usuario existe
@@ -107,7 +109,7 @@ router.post("/logout", async (req, res) => {
 	try {
 	  const { username } = req.body;
 	  if (!username) {
-		res.status(400).json({ error: "El username es requerido" });
+		res.json({ success: false,  message: "El username es requerido" });
 	  }
   
 	  await pool.query("UPDATE users SET isOnline = false WHERE username = ?", [username]);
@@ -122,22 +124,13 @@ router.post("/logout", async (req, res) => {
 	}
 });
 
-// Ruta para actualizar estado de edición del usuario
-router.post("/update-editing", async (req, res) => {
-    const { username, isEditing } = req.body;
-    
-    if (!username) res.status(400).json({ error: "El username es requerido" });
-
+router.get("/taskEditing", async (req, res) => {
     try {
-        await pool.query("UPDATE users SET isEditing = ? WHERE username = ?", [isEditing, username]);
-
-        // Emitir evento a los clientes conectados para actualizar la lista de usuarios
-        const io: Server = req.app.get("socketio");
-        io.emit("update_users");		
-        res.sendStatus(200);
-    } catch (error: any) {
-    	console.log("🚀 ~ router.post ~ error:", error)		
-        res.status(500).json({ error: "Error en el servidor" });
+      const [tasks] = await pool.query("SELECT * FROM tasks WHERE isEditing = true OR isNew = true");
+      res.json({ success: true, data: tasks });
+    } catch (error) {
+      console.error("Error al obtener tareas en edición:", error);
+      res.status(500).json({ success: false, message: "Error interno del servidor" });
     }
 });
 

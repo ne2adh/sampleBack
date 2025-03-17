@@ -19,10 +19,17 @@ router.get("/rows", async (req, res) => {
     const [rows] = await pool.query("SELECT * FROM tasks WHERE DATE(fecha) = ?", [fecha]);
     
     if (Array.isArray(rows)) {
-      const formattedRows = rows.map((row: any )=> ({
-        ...row,
-        fecha: new Date(row.fecha).toISOString().split('T')[0], // Extrae solo la fecha YYYY-MM-DD
-      }));
+        const formattedRows = rows
+        .map((row: any) => ({
+          ...row,
+          fecha: new Date(row.fecha).toISOString().split('T')[0], // Convertir fecha a YYYY-MM-DD
+        }))
+        .sort((a: any, b: any) => {
+          const dateTimeA = new Date(`${a.fecha}T${a.hora}`);
+          const dateTimeB = new Date(`${b.fecha}T${b.hora}`);
+          return dateTimeA.getTime() - dateTimeB.getTime();
+        });
+
       res.json({ success: true, data: formattedRows });
     } else {
       console.error("Error: rows no es un array", rows);

@@ -1,154 +1,221 @@
 import { Router } from "express";
 import { pool } from "./config";
-import { Server } from "socket.io";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
 const router = Router();
+const SECRET_KEY = "gobierno-autonomo-oruro"; // Cambiar por variable de entorno
 
-
+// Manejo mejorado de errores de base de datos
 const handleDatabaseError = (error: any, res: any) => {
-  console.error("Database error:", error);
-  res.status(503).json({ success: false, message: "Error en la base de datos" });
+	console.error("Database Error:", error);
+
+	if (error.code === "ER_DUP_ENTRY") {
+		return res.status(409).json({ message: "El registro ya existe" });
+	}
+	if (error.code === "ER_BAD_FIELD_ERROR") {
+		return res.status(400).json({ message: "Campo inválido en la solicitud" });
+	}
+	if (error.code === "ER_NO_REFERENCED_ROW" || error.code === "ER_NO_REFERENCED_ROW_2") {
+		return res.status(400).json({ message: "Clave foránea no válida" });
+	}
+
+	return res.status(500).json({ message: "Error interno del servidor" });
 };
 
-router.get("/rows", async (req, res) => {
-  try {
-    const { fecha } = req.query;
-    if (!fecha) {
-      res.json({ success: false, message: "El parámetro 'fecha' es requerido" });
-    }
-    const [rows] = await pool.query("SELECT * FROM tasks WHERE DATE(fecha) = ?", [fecha]);
-    
-    if (Array.isArray(rows)) {
-      const formattedRows = rows.map((row: any )=> ({
-        ...row,
-        fecha: new Date(row.fecha).toISOString().split('T')[0], // Extrae solo la fecha YYYY-MM-DD
-      }));
-      res.json({ success: true, data: formattedRows });
-    } else {
-      console.error("Error: rows no es un array", rows);
-      res.json({ success: false, message: "Error: rows no es un array" });
-    }
-    
-  } catch (error) {
-    handleDatabaseError(error, res);
-  }
-});
+// Login endpoint
+router.post("/login", async (req: any, res: any) => {
+	const { username, password } = req.body;
+	if (!username || !password) {
+		return res.status(400).json({ message: "Usuario y contraseña requeridos" });
+	}
 
-// Guardar o actualizar fila
-router.post("/rows", async (req, res) => {
-  try {
-    const { id, fecha, responsable, institucion, titulo, hora, lugar, isEditing, isNew } = req.body;
-    if (!fecha || !responsable || !titulo || !hora || !lugar) {
-      res.json({ success: false, message: "Faltan campos obligatorios" });
-    } else{
-        if (id && !isNew) {
-            await pool.query(
-                "UPDATE tasks SET fecha = ?, responsable = ?, institucion = ?, titulo = ?, hora = ?, lugar = ?, isEditing = ?, isNew = ? WHERE id = ?",
-                [fecha, responsable, institucion, titulo, hora, lugar, isEditing, isNew, id]
-            );
-        } else {
-            await pool.query(
-                "INSERT INTO tasks (id, fecha, responsable, institucion, titulo, hora, lugar, isEditing, isNew) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [id, fecha, responsable, institucion, titulo, hora, lugar, isEditing, isNew]
-            );
-        }
-        const io: Server = req.app.get("socketio");
-        io.emit("update", fecha);        
-        res.json({ success: true, message: "Operación exitosa" });
-    }
-  } catch (error) {
-    handleDatabaseError(error, res);
-  }
-});
-
-// Eliminar fila
-router.delete("/rows/:id/:c", async (req, res) => {
-  try {
-    const { id, c } = req.params;
-    if (!id) {
-      res.json({ success: false, message: "El ID es requerido" });
-    }
-    await pool.query("DELETE FROM tasks WHERE id = ?", [id]);
-    const io: Server = req.app.get("socketio");
-	io.emit("update", c);
-    console.log("Fila eliminada correctamente");
-
-    res.json({ success: true, message: "Fila eliminada correctamente" });
-  } catch (error) {
-    handleDatabaseError(error, res);
-  }
-});
-
-
-// Ruta para iniciar sesión o registrar usuario
-// Ruta para iniciar sesión o registrar usuario
-router.post("/login", async (req, res) => {
 	try {
-	  const { username } = req.body;
-	  if (!username) {
-		res.json({ success: false,  message: "El username es requerido" });
-	  }
-  
-	  // Verificar si el usuario existe
-	  const [rows]: any = await pool.query("SELECT * FROM users WHERE username = ?", [username]);
-  
-	  if (rows.length === 0) {
-		await pool.query("INSERT INTO users (username, isEditing, isOnline) VALUES (?, false, true)", [username]);
-	  } else {
-		await pool.query("UPDATE users SET isOnline = true WHERE username = ?", [username]);
-	  }
-  
-	  const [user]: any = await pool.query("SELECT * FROM users WHERE username = ?", [username]);
-  
-	  // Emitir evento de actualización
-	  const io: Server = req.app.get("socketio");
-	  io.emit("update_users");
-  
-	  res.json({ success: true, user: user[0] });
+		const [rows]: any = await pool.query("SELECT * FROM users WHERE username = ?", [username]);
+		if (!rows.length) {
+			return res.status(404).json({ message: "Usuario no encontrado" });
+		}
+
+		const user = rows[0];
+		const passwordMatch = await bcrypt.compare(password, user.password);
+		if (!passwordMatch) {
+			return res.status(401).json({ message: "Contraseña incorrecta" });
+		}
+
+		const token = jwt.sign({ id: user.id, username: user.username }, SECRET_KEY, { expiresIn: "1h" });
+		res.json({ token, user: { id: user.id, username: user.username } });
 	} catch (error) {
-	  handleDatabaseError(error, res);
+		handleDatabaseError(error, res);
 	}
 });
 
-// Ruta para cerrar sesión
-router.post("/logout", async (req, res) => {
+// CRUD de usuarios
+router.post("/users", async (req: any, res: any) => {
+	const { username, password } = req.body;
+	if (!username || !password) {
+		return res.status(400).json({ message: "Usuario y contraseña requeridos" });
+	}
+
+	const hashedPassword = await bcrypt.hash(password, 10);
 	try {
-	  const { username } = req.body;
-	  if (!username) {
-		res.json({ success: false,  message: "El username es requerido" });
-	  }
-  
-	  await pool.query("UPDATE users SET isOnline = false WHERE username = ?", [username]);
-  
-	  // Emitir evento de actualización
-	  const io: Server = req.app.get("socketio");
-	  io.emit("update_users");
-  
-	  res.json({ success: true, message: "Usuario deslogueado" });
+		await pool.query("INSERT INTO users (username, password) VALUES (?, ?)", [username, hashedPassword]);
+		res.status(201).json({ message: "Usuario creado exitosamente" });
 	} catch (error) {
-	  handleDatabaseError(error, res);
+		handleDatabaseError(error, res);
 	}
 });
 
-router.get("/taskEditing", async (req, res) => {
-    try {
-      const [tasks] = await pool.query("SELECT * FROM tasks WHERE isEditing = true OR isNew = true");
-      res.json({ success: true, data: tasks });
-    } catch (error) {
-      console.error("Error al obtener tareas en edición:", error);
-      res.status(500).json({ success: false, message: "Error interno del servidor" });
-    }
-});
-
-// Ruta para obtener los usuarios conectados y en edición
-router.get("/usuarios", async (req, res) => {
+router.get("/users/:id", async (req: any, res: any) => {
+	const { id } = req.params;
 	try {
-	  const [users] = await pool.query("SELECT * FROM users WHERE isOnline = true");
-	  res.json({ success: true, data: users });
+		const [rows]: any = await pool.query("SELECT id, username FROM users WHERE id = ?", [id]);
+		if (!rows.length) {
+			return res.status(404).json({ message: "Usuario no encontrado" });
+		}
+		res.json(rows[0]);
 	} catch (error) {
-	  handleDatabaseError(error, res);
+		handleDatabaseError(error, res);
 	}
 });
+
+router.put("/users/:id", async (req, res) => {
+	const { id } = req.params;
+	const { username, password } = req.body;
+	const hashedPassword = password ? await bcrypt.hash(password, 10) : undefined;
+
+	try {
+		await pool.query("UPDATE users SET username = ?, password = COALESCE(?, password) WHERE id = ?", [username, hashedPassword, id]);
+		res.json({ message: "Usuario actualizado" });
+	} catch (error) {
+		handleDatabaseError(error, res);
+	}
+});
+
+router.delete("/users/:id", async (req, res) => {
+	const { id } = req.params;
+	try {
+		await pool.query("DELETE FROM users WHERE id = ?", [id]);
+		res.json({ message: "Usuario eliminado" });
+	} catch (error) {
+		handleDatabaseError(error, res);
+	}
+});
+
+
+
+// Crear una nueva tarea
+router.post("/tasks", async (req: any, res: any) => {
+	const { fecha, solicitante, institucion, titulo, hora, responsable, estado, fid_users } = req.body;
+	const io = req.app.get("socketio");
+
+	if (!fecha || !solicitante || !institucion || !titulo || !hora || !responsable || !estado || !fid_users) {
+		return res.status(400).json({ message: "Todos los campos son requeridos" });
+	}
+
+	try {
+		const [result]: any = await pool.query(
+			`INSERT INTO tasks (id, fecha, solicitante, institucion, titulo, hora, responsable, estado, fid_users)
+			 VALUES (UUID(), ?, ?, ?, ?, ?, ?, false, true, ?)`,
+			[fecha, solicitante, institucion, titulo, hora, responsable, estado, fid_users]
+		);
+
+		const newTaskId = result.insertId;
+		io.emit("task_created", { id: newTaskId, fecha, solicitante, institucion, titulo, hora, responsable, estado });
+
+		res.status(201).json({ message: "Tarea creada exitosamente" });
+	} catch (error) {
+		handleDatabaseError(error, res);
+	}
+});
+
+// Obtener todas las tareas
+router.get("/tasks", async (req, res) => {
+	const io = req.app.get("socketio");
+	try {
+		
+		const [rows]: any = await pool.query("SELECT * FROM tasks");
+		//io.emit('load:tasks', rows);
+		res.json(rows);
+	} catch (error) {
+		handleDatabaseError(error, res);
+	}
+});
+
+// Obtener una tarea por ID
+router.get("/tasks/:id", async (req: any, res: any) => {
+	const { id } = req.params;
+	try {
+		const [rows]: any = await pool.query("SELECT * FROM tasks WHERE id = ?", [id]);
+
+		if (!rows.length) {
+			return res.status(404).json({ message: "Tarea no encontrada" });
+		}
+
+		res.json(rows[0]);
+	} catch (error) {
+		handleDatabaseError(error, res);
+	}
+});
+
+// Actualizar una tarea
+router.put("/tasks/:id", async (req, res) => {
+	const { id } = req.params;
+	const { fecha, solicitante, institucion, titulo, hora, responsable, estado } = req.body;
+	const io = req.app.get("socketio");
+
+	try {
+		await pool.query(
+			`UPDATE tasks SET fecha = ?, solicitante = ?, institucion = ?, titulo = ?, hora = ?, responsable, estado = ?,  
+			  WHERE id = ?`,
+			[fecha, solicitante, institucion, titulo, hora, responsable, estado, estado, id]
+		);
+
+		io.emit("task_updated", { id, fecha, solicitante, institucion, titulo, hora, responsable, estado });
+
+		res.json({ message: "Tarea actualizada" });
+	} catch (error) {
+		handleDatabaseError(error, res);
+	}
+});
+
+// Eliminar una tarea
+router.delete("/tasks/:id", async (req, res) => {
+	const { id } = req.params;
+	const io = req.app.get("socketio");
+
+	try {
+		await pool.query("DELETE FROM tasks WHERE id = ?", [id]);
+
+		io.emit("task_deleted", { id });
+
+		res.json({ message: "Tarea eliminada" });
+	} catch (error) {
+		handleDatabaseError(error, res);
+	}
+});
+
+router.post("/logout", (req: any, res: any) => {
+	const token = req.headers.authorization?.split(" ")[1];
+
+	if (!token) {
+		return res.status(400).json({ message: "Token requerido para cerrar sesión" });
+	}
+
+	try {
+		// Verifica si el token es válido
+		const decoded = jwt.verify(token, SECRET_KEY);
+		console.log("🚀 ~ router.post ~ decoded:", decoded)
+		
+		res.json({ message: "Sesión cerrada exitosamente" });
+	} catch (error) {
+		return res.status(401).json({ message: "Token inválido o expirado" });
+	}
+});
+
+export const getTasksByDateRange = async (from: string, to: string) => {
+	const [rows] = await pool.query("SELECT * FROM tasks WHERE fecha BETWEEN ? AND ?", [from, to]);
+	
+	return rows;
+};
 
 export default router;
-

@@ -105,22 +105,25 @@ router.delete("/users/:id", async (req, res) => {
 
 // Crear una nueva tarea
 router.post("/tasks", async (req: any, res: any) => {
-	const { fecha, solicitante, institucion, titulo, hora, responsable, estado, fid_users } = req.body;
+	const { fecha, solicitante, institucion, titulo, hora, responsable, user_id } = req.body;
 	const io = req.app.get("socketio");
+	console.log("🚀 ~ router.post ~ user_id:", user_id)
 
-	if (!fecha || !solicitante || !institucion || !titulo || !hora || !responsable || !estado || !fid_users) {
-		return res.status(400).json({ message: "Todos los campos son requeridos" });
+	if (!fecha || !solicitante || !institucion || !titulo || !hora || !responsable || !user_id) {
+		res.status(400).json({ message: "Todos los campos son requeridos" });
 	}
 
 	try {
 		const [result]: any = await pool.query(
-			`INSERT INTO tasks (id, fecha, solicitante, institucion, titulo, hora, responsable, estado, fid_users)
-			 VALUES (UUID(), ?, ?, ?, ?, ?, ?, false, true, ?)`,
-			[fecha, solicitante, institucion, titulo, hora, responsable, estado, fid_users]
+			`INSERT INTO tasks (id, fecha, solicitante, institucion, titulo, hora, responsable, estado, user_id)
+			 VALUES (UUID(), ?, ?, ?, ?, ?, ?, false, ?)`,
+			[fecha, solicitante, institucion, titulo, hora, responsable, false, user_id]
 		);
+		
+		console.log("🚀 ~ router.post ~ result:", result)
 
 		const newTaskId = result.insertId;
-		io.emit("task_created", { id: newTaskId, fecha, solicitante, institucion, titulo, hora, responsable, estado });
+		io.emit("task_created", { id: newTaskId, fecha, solicitante, institucion, titulo, hora, responsable });
 
 		res.status(201).json({ message: "Tarea creada exitosamente" });
 	} catch (error) {
@@ -130,9 +133,8 @@ router.post("/tasks", async (req: any, res: any) => {
 
 // Obtener todas las tareas
 router.get("/tasks", async (req, res) => {
-	const io = req.app.get("socketio");
-	try {
-		
+	//const io = req.app.get("socketio");
+	try {		
 		const [rows]: any = await pool.query("SELECT * FROM tasks");
 		//io.emit('load:tasks', rows);
 		res.json(rows);
@@ -214,8 +216,37 @@ router.post("/logout", (req: any, res: any) => {
 
 export const getTasksByDateRange = async (from: string, to: string) => {
 	const [rows] = await pool.query("SELECT * FROM tasks WHERE fecha BETWEEN ? AND ?", [from, to]);
-	
-	return rows;
+	if (Array.isArray(rows)) {
+		const formattedRows = rows.map((row: any )=> ({
+		  ...row,
+		  fecha: new Date(row.fecha).toISOString().split('T')[0], // Extrae solo la fecha YYYY-MM-DD
+		}));		
+		return formattedRows;
+	  } else {
+		console.error("Error: rows no es un array", rows);
+		return [];
+	}
 };
+
+export const getsaveTasks = async (data: any) => {
+	const { fecha, solicitante, institucion, titulo, hora, responsable, user_id } = data;
+	
+	const taskId = crypto.randomUUID();
+
+	const [result]: any = await pool.query(
+		`INSERT INTO tasks (id, fecha, solicitante, institucion, titulo, hora, responsable, estado, user_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		[taskId, fecha, solicitante, institucion, titulo, hora, responsable, false, user_id]
+	);
+	
+	const [row] : any = await pool.query("SELECT * FROM tasks WHERE id = ?", [taskId]);
+	if (row) {		
+		const formattedRows = { ...row[0], fecha: new Date(row[0].fecha).toISOString().split('T')[0] };
+		return formattedRows;
+	  } else {
+		console.error("Error: rows no es un array", row);
+		return [];
+	}
+}
 
 export default router;

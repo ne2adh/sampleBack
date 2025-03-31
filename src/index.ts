@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import http from "http"; 
 import { Server } from "socket.io";
-import router, { getTasksByDateRange } from "./routes";
+import router, { getsaveTasks, getTasksByDateRange } from "./routes";
 
 const app = express();
 const server = http.createServer(app);
@@ -30,17 +30,18 @@ io.on("connection", (socket) => {
 	});
 
   // 🔹 Escuchar cambios en las tareas
-  socket.on("task_created", (data) => {
-    io.emit("task_created", data);
+  socket.on("task:created", async (data) => {
+    const task = await getsaveTasks(data);
+    io.emit("task:created", task);
   });
 
-  socket.on("task_updated", (data) => {
-    io.emit("task_updated", data);
+  socket.on("task:updated", (data) => {
+    io.emit("task:updated", data);
   });
 
-  socket.on("task_deleted", (data) => {
-    io.emit("task_deleted", data);
-  });
+  socket.on("task:deleted", (data) => {
+    io.emit("task:deleted", data);
+  });  
 
   socket.on("disconnect", () => {
     console.log("Usuario desconectado");
